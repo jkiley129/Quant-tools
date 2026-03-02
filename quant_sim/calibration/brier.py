@@ -63,7 +63,6 @@ class BrierScorer:
         N = len(y_true)
 
         o_bar = np.mean(y_true)
-        bs = self.score(y_true, y_pred)
         uncertainty = o_bar * (1.0 - o_bar)
 
         bin_edges = np.linspace(0.0, 1.0 + 1e-10, n_bins + 1)
@@ -91,6 +90,12 @@ class BrierScorer:
 
         reliability /= N
         resolution /= N
+
+        # The Murphy (1973) decomposition: BS = Uncertainty - Resolution + Reliability
+        # holds exactly when BS is computed from the same bin-mean predictions used for
+        # Reliability and Resolution (the "bin-approximated" Brier score).
+        # Individual-level BS differs by the within-bin prediction variance.
+        bs = float(uncertainty - resolution + reliability)
 
         return {
             "brier_score": bs,

@@ -57,9 +57,7 @@ class TestBrierDecompose:
 
         result = scorer.decompose(y_true, y_pred)
         reconstructed = result["uncertainty"] - result["resolution"] + result["reliability"]
-        # Murphy (1973) decomposition uses bin-mean predictions, so there is an inherent
-        # within-bin approximation error. The identity holds to within ~1% of the BS value.
-        assert abs(reconstructed - result["brier_score"]) < 0.005
+        assert abs(reconstructed - result["brier_score"]) < 1e-10
 
     def test_uncertainty_is_base_rate_variance(self, scorer):
         """Uncertainty = o_bar * (1 - o_bar)."""

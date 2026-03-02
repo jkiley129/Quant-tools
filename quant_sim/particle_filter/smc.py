@@ -64,6 +64,16 @@ class GBMStateSpaceModel:
             self.obs_noise_std * np.sqrt(2 * np.pi)
         )
 
+    def log_likelihood(self, particles: np.ndarray, observation: float) -> np.ndarray:
+        """Compute log p(y_t | x_t) for each particle (numerically stable).
+
+        Avoids underflow for extreme observations where exp() would return 0.
+        """
+        diff = observation - particles
+        return -0.5 * (diff / self.obs_noise_std) ** 2 - np.log(
+            self.obs_noise_std * np.sqrt(2 * np.pi)
+        )
+
 
 class ParticleFilter:
     """Bootstrap Particle Filter (Sequential Importance Resampling).
@@ -127,13 +137,15 @@ class ParticleFilter:
         # 1. Predict
         self.particles = self.model.transition(self.particles)
 
-        # 2. Weight update
-        likelihoods = self.model.likelihood(self.particles, observation)
-        self.weights = self.weights * likelihoods
-
-        # Handle numerical collapse
+        # 2. Weight update in log-space to avoid underflow for extreme observations.
+        #    Particles with weight=0 get log(1e-300) ≈ -690, ensuring they remain at
+        #    near-zero weight without causing -inf propagation through log(0).
+        log_likelihoods = self.model.log_likelihood(self.particles, observation)
+        log_weights = np.log(np.where(self.weights > 0, self.weights, 1e-300)) + log_likelihoods
+        log_weights -= np.max(log_weights)  # shift for numerical stability before exp
+        self.weights = np.exp(log_weights)
         w_sum = self.weights.sum()
-        if w_sum == 0 or not np.isfinite(w_sum):
+        if not np.isfinite(w_sum) or w_sum == 0:
             self.weights = np.ones(self.n_particles) / self.n_particles
         else:
             self.weights /= w_sum
