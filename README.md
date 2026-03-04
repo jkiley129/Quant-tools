@@ -1,336 +1,343 @@
-# Quant-Tools
+# Quant-Tools Simulation Engine
 
-A self-contained Python toolkit for institutional-grade quantitative finance simulation. Run Monte Carlo pricing, importance sampling, particle filters, variance reduction, copula models, and agent-based markets — all from a single CLI, with optional real-ticker calibration via yfinance.
+A quantitative finance toolkit covering the full stack described in *"How I'd Become a Quant If I Had to Start Over Tomorrow"* — from stochastic calculus through portfolio optimization, factor models, and prediction markets.
 
 ---
 
-## Quickstart
+## Setup Guide
+
+### Prerequisites
+
+- **Python 3.10 or higher** — check with `python --version`
+- **pip** — check with `pip --version`
+
+If you don't have Python 3.10+, install it from [python.org](https://www.python.org/downloads/) or via your OS package manager.
+
+### 1. Clone the repository
+
+```bash
+git clone <your-repo-url>
+cd Quant-tools
+```
+
+### 2. (Recommended) Create a virtual environment
+
+```bash
+python -m venv .venv
+
+# Activate it:
+# macOS / Linux:
+source .venv/bin/activate
+
+# Windows (PowerShell):
+.venv\Scripts\Activate.ps1
+
+# Windows (cmd.exe):
+.venv\Scripts\activate.bat
+```
+
+### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
-
-# Run any simulation
-python main.py list                                          # show all commands
-python main.py --no-plots all                               # run every demo sequentially
-
-# Synthetic demos (no internet required)
-python main.py --no-plots gbm
-python main.py --no-plots copula
-python main.py --no-plots abm
-
-# Real-ticker analysis (requires internet)
-python main.py gbm --ticker NVDA --strike 1000 --maturity 0.5
-python main.py copula --tickers NVDA AMD SMCI --period 2y
-python main.py importance --ticker NVDA --threshold 1.5
 ```
 
----
+This installs:
 
-## What's Inside
+| Package | What it's for |
+|---|---|
+| `numpy`, `scipy` | Core numerics, MLE, statistics |
+| `pandas` | Time series, data alignment |
+| `matplotlib` | All plots |
+| `yfinance` | Fetch real market data |
+| `cvxpy` | Convex portfolio optimization (Markowitz) |
+| `scikit-learn` | PCA decomposition |
+| `statsmodels` | Factor regression with Newey-West SEs |
 
-| Module | Class | What it answers |
-|---|---|---|
-| `monte_carlo/gbm.py` | `GBMSimulator` | What is P(NVDA > $1000 in 6 months)? |
-| `calibration/brier.py` | `BrierScorer` | Is my probability forecast well-calibrated? |
-| `importance_sampling/tail_risk.py` | `ImportanceSampler` | How do I efficiently estimate rare 50%-gain events? |
-| `variance_reduction/techniques.py` | `VarianceReducer` | Which sampling technique gives the tightest confidence interval? |
-| `particle_filter/smc.py` | `ParticleFilter` | How does the probability of hitting a target update as prices arrive? |
-| `copulas/models.py` | `GaussianCopula`, `StudentTCopula`, `ClaytonCopula` | Do NVDA, AMD, and SMCI crash together more than Gaussian assumes? |
-| `abm/market.py` | `PredictionMarket` | How quickly does a market with informed and noise traders converge to fair value? |
-
----
-
-## CLI Reference
-
-### Global options (must come before the subcommand)
-
-```
-python main.py [GLOBAL OPTIONS] COMMAND [COMMAND OPTIONS]
-
-  -s, --seed SEED      Random seed for reproducibility (default: 42)
-  -n, --n-paths N      Simulation paths or samples (default: 100000)
-  --no-plots           Suppress matplotlib display (useful in CI/headless)
-  --save-plots DIR     Save all plots to DIR as PNG files instead of displaying
-```
-
-### Commands
-
-#### `gbm` — Monte Carlo binary contract pricing
-
-Prices digital (binary) options under Geometric Brownian Motion and cross-checks against the analytical lognormal formula.
+### 4. Verify the install
 
 ```bash
-# Synthetic: AAPL-like parameters
-python main.py --no-plots gbm
+python main.py list
+```
 
-# Real ticker: auto-fetch price and calibrate sigma/mu from 1y history
-python main.py gbm --ticker NVDA --strike 1000 --maturity 0.5
+You should see all 12 available commands.
+
+### 5. Run a quick smoke test (no internet required)
+
+```bash
+python main.py --no-plots all
+```
+
+This runs every simulation sequentially and prints results. Takes ~30–60 seconds.
+
+### 6. Run the full test suite
+
+```bash
+pip install pytest
+pytest tests/ -v
+```
+
+Expected: all tests pass.
+
+---
+
+## Commands
+
+```
+python main.py <command> [options]
+```
+
+### Global options (work with every command)
+
+| Flag | Default | Description |
+|---|---|---|
+| `-s, --seed` | `42` | Random seed for reproducibility |
+| `-n, --n-paths` | `100000` | Monte Carlo paths / samples |
+| `--no-plots` | off | Suppress matplotlib windows |
+| `--save-plots DIR` | off | Save plots as PNG files to DIR |
+
+---
+
+## Module Reference & Examples
+
+### `greeks` — Vanilla Black-Scholes + option Greeks
+
+Prices European calls and puts. Computes all five Greeks analytically:
+- **Δ (delta)** — hedge ratio; how much the option moves per $1 stock move
+- **Γ (gamma)** — convexity; how fast delta changes
+- **Θ (theta)** — time decay per day
+- **ν (vega)** — sensitivity to a 1% move in implied vol
+- **ρ (rho)** — sensitivity to a 1% move in the risk-free rate
+
+Verifies Monte Carlo converges to the closed-form price.
+
+```bash
+# Default synthetic example (S0=100, sigma=20%, T=1yr)
+python main.py greeks
 
 # Custom parameters
-python main.py --no-plots gbm --spot 100 --vol 0.30 --drift 0.12 --strike 115 --maturity 1.0
-```
+python main.py greeks --spot 150 --vol 0.30 --maturity 0.5 --rate 0.04
 
-Options: `--ticker`, `--period`, `--spot`, `--drift`, `--vol`, `--rate`, `--maturity`, `--strike`
-
-Sample output:
-```
-  Strike   MC Price  Analytical  Std Error                  95% CI
------------------------------------------------------------------
-  163.8      0.7690      0.7692   0.001333  [0.7663, 0.7716]
-  182.0      0.5780      0.5808   0.001562  [0.5749, 0.5810]
-  200.2      0.3878      0.3908   0.001541  [0.3848, 0.3909]
+# Save plots instead of displaying
+python main.py greeks --save-plots ./charts
 ```
 
 ---
 
-#### `brier` — Brier Score calibration analysis
+### `distributions` — MLE fat-tail fitting + permutation testing
 
-Decomposes forecast accuracy into **Uncertainty** (irreducible), **Resolution** (discriminative power), and **Reliability** (calibration error), comparing a well-calibrated vs overconfident forecaster.
+Demonstrates the post's core statistical insight: *"Most of what looks like signal is noise."*
+
+1. Fetches real returns (or simulates synthetic fat-tailed data)
+2. Tests normality with D'Agostino-Pearson, Shapiro-Wilk, and Jarque-Bera
+3. Fits Normal vs Student-t via MLE — compares AIC scores
+4. Runs a permutation test on a momentum signal to check if it beats a random coin-flip
 
 ```bash
-python main.py --no-plots brier
-python main.py --no-plots brier --n-samples 5000 --n-bins 15
-```
+# Synthetic Student-t(df=4) example (no internet needed)
+python main.py distributions
 
-Sample output:
-```
-  Well-calibrated
-    Brier Score:   0.1891
-    Uncertainty:   0.2498  (irreducible)
-    Resolution:    0.0624  (higher = better)
-    Reliability:   0.0010  (lower = better)
-    Skill Score:   +0.2429
-
-  Overconfident
-    Reliability:   0.0185  (lower = better)
-    Skill Score:   +0.1776
+# Real returns from yfinance
+python main.py distributions --ticker SPY --period 5y
+python main.py distributions --ticker NVDA --period 3y
 ```
 
 ---
 
-#### `importance` — Importance Sampling for tail risk
+### `portfolio` — Markowitz efficient frontier + Kelly criterion
 
-Estimates P(S_T > threshold) using exponential tilting — shifting the GBM drift toward the rare event. Achieves orders-of-magnitude variance reduction for tail probabilities that naive Monte Carlo struggles to estimate.
+Implements two complementary approaches to portfolio construction:
+
+**Markowitz (1952):** minimise variance for a target return, sweeping the efficient frontier.
+
+**Kelly criterion (multi-asset):** maximise expected log-wealth:
+`w* = inv(Sigma) * (mu - r)`. Fractional Kelly (half Kelly) is the practical choice — full Kelly is theoretically optimal but highly sensitive to estimation error.
 
 ```bash
-# Estimate P(S_T > 1.5*S0): a 50% gain event over 6 months
-python main.py --no-plots importance
+# Synthetic 5-asset example (no internet needed)
+python main.py portfolio
 
-# Real ticker
-python main.py importance --ticker NVDA --threshold 1.5 --maturity 0.5
-```
+# Real tickers — long-only
+python main.py portfolio --tickers AAPL MSFT NVDA AMZN GOOG --period 3y
 
-Sample output:
-```
-  Method            Estimate   Std Error    95% CI Width   Time(s)
-  Naive MC          0.017910    0.000419        0.001644     0.006
-  Import. Samp.     0.018069    0.000001        0.000004     0.016
-  Analytical        0.017900
-
-  Variance reduction ratio: 212047x
-  CVaR(5%): $72.02  |  VaR(5%): $77.44
+# Allow short positions (up to -30% per asset)
+python main.py portfolio --tickers AAPL MSFT NVDA AMZN --allow-short
 ```
 
 ---
 
-#### `variance` — Variance reduction comparison
+### `factors` — PCA + Fama-French style regression
 
-Prices a binary call using four methods and reports variance reduction ratios relative to crude Monte Carlo.
+Two tools for decomposing what drives portfolio returns:
 
-| Method | Mechanism | Typical VRR |
-|---|---|---|
-| Crude MC | Baseline | 1x |
-| Antithetic variates | Use Z and −Z pairs | ~17x |
-| Control variates | OLS correction using known E[S_T] | ~3x |
-| Stratified sampling | Force uniform quantile coverage | ~130x |
+**PCA:** Extracts latent risk factors. In a 500-stock universe, the first 5 eigenvectors typically explain 70% of variance — the rest is idiosyncratic noise.
+
+**Factor regression (Newey-West):** Regresses portfolio returns on factor returns:
+`r_t = alpha + beta_1*F1 + ... + epsilon_t`
+
+The **alpha** intercept is the return unexplained by known factors. Uses Newey-West HAC standard errors — standard OLS errors are wrong for financial time series (autocorrelation + heteroskedasticity).
 
 ```bash
-python main.py --no-plots variance
-python main.py variance --ticker NVDA --strike 1000 --maturity 0.5
+# Synthetic 10-asset example (no internet needed)
+python main.py factors
+
+# Real tickers — needs at least 4 for meaningful PCA
+python main.py factors --tickers AAPL MSFT NVDA AMZN GOOG META TSLA NFLX --period 3y
+
+# Control number of PCA components
+python main.py factors --tickers AAPL MSFT NVDA AMZN GOOG --n-components 2
 ```
 
 ---
 
-#### `particle` — Particle Filter real-time probability updating
+### `lmsr` — LMSR automated prediction market
 
-Tracks the current price estimate from noisy observations and computes the forward-looking probability P(S_end > K) at each time step using sequential importance resampling.
+Implements the Logarithmic Market Scoring Rule (Robin Hanson, 2003) — the automated market maker powering Polymarket and other prediction markets.
+
+**Cost function:** `C(q) = b * ln(sum_i exp(q_i / b))`
+
+**Prices = softmax:** `p_i = exp(q_i/b) / sum_j exp(q_j/b)` — the same function that powers every neural network classifier.
+
+**Key properties:**
+- Prices always sum to 1 and lie in (0, 1) — infinite liquidity guaranteed
+- Market maker's worst-case loss is bounded: `b * ln(n)`
+- Informed traders push prices toward the true probability
 
 ```bash
-python main.py --no-plots particle
-python main.py particle --n-particles 2000 --obs-noise 0.003 --n-steps 252
-```
+# Default: binary market, true P(YES)=65%, 200 traders
+python main.py lmsr
 
-Sample output — probability evolves as price path becomes clearer:
-```
-    Day   Filter Price   True Price     Error      ESS    P(end>K)
-      0         101.39       100.81     +0.58      189      0.4797
-     50          85.65        85.34     +0.31      245      0.1917
-    251         106.87       105.53     +1.35      145      0.0349
+# Higher true probability
+python main.py lmsr --true-prob 0.80 --n-traders 500
+
+# More liquid market (higher b)
+python main.py lmsr --b 200 --true-prob 0.55
 ```
 
 ---
 
-#### `copula` — Correlated multi-asset simulation
+### `gbm` — Monte Carlo GBM binary contract pricing
 
-Simulates joint terminal prices under three copula structures and quantifies tail dependence differences.
-
-| Copula | Tail behavior | Use case |
-|---|---|---|
-| Gaussian | No tail dependence | Standard linear correlation |
-| Student-t | Symmetric upper + lower tail | Crash AND rally clustering |
-| Clayton | Lower tail only | Assets crash together, recover independently |
+Prices binary (digital) options: pays $1 if S_T > K. Cross-checks Monte Carlo against the analytical Black-Scholes formula. Includes the Ito correction (`-sigma^2/2`) and Euler-Maruyama path simulation.
 
 ```bash
-# Synthetic 2-asset (SPY/QQQ-like) comparison
-python main.py --no-plots copula
+python main.py gbm
 
-# Real 3-asset semiconductor sector analysis
+# Real ticker calibration
+python main.py gbm --ticker NVDA --maturity 0.5
+python main.py gbm --ticker AAPL --strike 200 210 220 --maturity 1.0
+```
+
+---
+
+### `importance` — Importance Sampling for tail risk
+
+Estimates rare-event probabilities (e.g. P(S_T > 1.5*S0)) using exponential tilting. Far more efficient than crude Monte Carlo for extreme tails.
+
+```bash
+python main.py importance
+
+# 50% gain threshold
+python main.py importance --ticker NVDA --threshold 1.5
+
+# Custom threshold
+python main.py importance --threshold 2.0 --maturity 1.0
+```
+
+---
+
+### `variance` — Variance reduction techniques
+
+Benchmarks four variance reduction methods against crude Monte Carlo:
+- **Antithetic variates** (Z and -Z pairs)
+- **Control variates** (OLS correction using known E[S_T])
+- **Stratified sampling** (uniform quantile coverage)
+
+```bash
+python main.py variance
+python main.py variance --ticker AAPL --maturity 1.0
+```
+
+---
+
+### `copula` — Multi-asset tail dependence
+
+Models correlations between assets during crashes vs normal times:
+- **Gaussian copula** — linear correlation, no tail dependence
+- **Student-t copula** — symmetric upper + lower tail dependence
+- **Clayton copula** — lower tail dependence only (assets crash together, recover independently)
+
+```bash
+python main.py copula
+
+# Real tickers
 python main.py copula --tickers NVDA AMD SMCI --period 2y
-```
 
-Sample output:
+# Custom parameters
+python main.py copula --correlation 0.8 --df 3 --drop-threshold 0.15
 ```
-  Copula                   Emp. Corr  P(all drop>10%)  P(all gain>20%)
-  Gaussian                    0.7516            0.0671            0.1058
-  Student-t (df=4.0)          0.7398            0.0697            0.1088
-  Clayton (θ=2.0)             0.6880            0.0857            0.0741
-```
-Clayton's higher `P(all drop>10%)` and lower `P(all gain>20%)` confirms lower-tail dependence — the sector is more likely to crash together than rally together.
 
 ---
 
-#### `abm` — Agent-Based prediction market
+### `particle` — Sequential Monte Carlo particle filter
 
-Simulates a limit order book with three agent types competing in a binary prediction market:
-
-- **InformedAgent** — knows the true event probability; trades on mispricing
-- **NoiseAgent** — trades randomly; provides liquidity
-- **MarketMakerAgent** — continuously quotes bid/ask spread; manages inventory
+Bayesian real-time updating of P(S_T > K | observations). Uses log-space weight updates to prevent underflow. Systematic resampling triggered by ESS threshold.
 
 ```bash
-python main.py --no-plots abm
-python main.py --no-plots abm --n-steps 500 --n-informed 5 --n-noise 15 --n-mm 3
-```
-
-Sample output:
-```
-  Total trades executed: 722
-  Price error RMSE:      0.3273
-  Convergence half-life: 5 steps
-  Mean bid-ask spread:   0.0080
-
-  Agent P&L by type:
-    InformedAgent       :      +0.12
-    NoiseAgent          :      -0.57
-    MarketMakerAgent    :      +2.78
+python main.py particle
+python main.py particle --ticker SPY --n-particles 2000
 ```
 
 ---
 
-#### `all` — Run everything
+### `brier` — Brier score calibration
+
+Forecast calibration analysis with Murphy (1973) decomposition:
+`BS = Uncertainty - Resolution + Reliability`
 
 ```bash
-python main.py --no-plots --seed 42 all
-python main.py --save-plots ./plots all      # save every plot to ./plots/
+python main.py brier
+python main.py brier --n-samples 5000 --n-bins 15
 ```
 
 ---
 
-## Using as a Python Library
+### `abm` — Agent-based prediction market
 
-All simulation engines are plain Python classes — import them directly for notebooks, scripts, or a backend API.
+Limit order book simulation with three agent archetypes:
+- **InformedAgent** — trades on true probability with mispricing threshold
+- **NoiseAgent** — random trades (liquidity provision)
+- **MarketMakerAgent** — continuous bid/ask quotes with inventory skewing
 
-```python
-from quant_sim.monte_carlo.gbm import GBMSimulator
-from quant_sim.copulas.models import ClaytonCopula, StudentTCopula
-from quant_sim.data.calibrator import calibrate_multi
-import numpy as np
-
-# Price a binary call on NVDA
-sim = GBMSimulator(S0=875, mu=0.25, sigma=0.48, r=0.05, T=0.5, n_paths=100_000)
-result = sim.price_binary_call(K=1000)
-print(f"P(NVDA > $1000 in 6mo): {result['mc_price']:.4f} ± {result['std_error']:.4f}")
-
-# Calibrate from real data and run copula analysis
-calib = calibrate_multi(["NVDA", "AMD", "SMCI"], period="2y")
-rho = calib["correlation_matrix"]
-params = calib["params"]
-
-cop = StudentTCopula(rho_matrix=rho, df=4.0)
-prices = cop.simulate_asset_prices(
-    n=100_000,
-    S0_list=[p["S0"] for p in params],
-    mu_list=[p["mu"] for p in params],
-    sigma_list=[p["sigma"] for p in params],
-    r=0.05,
-    T=0.5,
-)
-S0_arr = np.array([p["S0"] for p in params])
-joint_crash = np.mean(np.all(prices < S0_arr * 0.80, axis=1))
-print(f"P(all three drop >20%): {joint_crash:.4f}")
+```bash
+python main.py abm
+python main.py abm --n-informed 5 --n-noise 20 --n-mm 3 --n-steps 500
 ```
 
 ---
 
-## Architecture
+## Running all modules at once
 
+```bash
+# All modules, no plots (fastest, ~60s)
+python main.py --no-plots all
+
+# All modules, save every plot
+python main.py --save-plots ./output all
+
+# All modules with a fixed seed
+python main.py --seed 123 --no-plots all
 ```
-quant_sim/
-├── data/
-│   ├── fetcher.py       # yfinance wrapper: fetch_prices(), fetch_multi()
-│   └── calibrator.py    # GBM calibration: calibrate_gbm(), calibrate_multi()
-├── utils/
-│   ├── stats.py         # ESS, systematic_resample, log_likelihood_ratio
-│   └── plotting.py      # matplotlib helpers (price paths, reliability diagrams, etc.)
-├── monte_carlo/
-│   └── gbm.py           # GBMSimulator
-├── calibration/
-│   └── brier.py         # BrierScorer
-├── importance_sampling/
-│   └── tail_risk.py     # ImportanceSampler
-├── variance_reduction/
-│   └── techniques.py    # VarianceReducer
-├── particle_filter/
-│   └── smc.py           # ParticleFilter, GBMStateSpaceModel
-├── copulas/
-│   └── models.py        # GaussianCopula, StudentTCopula, ClaytonCopula
-└── abm/
-    ├── order_book.py    # LimitOrderBook (price-time priority FIFO)
-    ├── agents.py        # InformedAgent, NoiseAgent, MarketMakerAgent
-    └── market.py        # PredictionMarket
-main.py                  # CLI entry point (argparse subcommands)
-```
-
-**Dependency flow:** `utils/` ← `monte_carlo/` ← `importance_sampling/`, `variance_reduction/`, `abm/`. No circular imports. All math implemented from scratch using numpy + scipy.
-
-**Frontend-ready:** The CLI layer (`main.py`) is thin — each command calls a `run_*_demo()` function that wraps the underlying class. A FastAPI or Streamlit frontend can import `quant_sim` classes directly without touching the CLI layer.
 
 ---
 
-## Dependencies
+## Learning path (from the post)
 
-```
-numpy>=1.26.0
-scipy>=1.12.0
-pandas>=2.2.0
-matplotlib>=3.8.0
-yfinance>=0.2.40
-```
-
-No QuantLib, PyMC, filterpy, pyvinecopulib, or other specialized quant libraries. All algorithms (copulas, particle filter, importance sampling, Brier decomposition) are implemented from scratch.
-
----
-
-## Key Mathematical Notes
-
-**GBM terminal price** — uses closed-form `S_T = S0 * exp((mu - 0.5*sigma²)*T + sigma*sqrt(T)*Z)`. The Ito correction `-0.5*sigma²` is essential; omitting it biases all probability estimates.
-
-**Importance weights** — computed in log-space (`log_w = log_p - log_q`) with log-sum-exp stabilization before `exp()`. Prevents underflow when estimating probabilities that span many orders of magnitude.
-
-**Particle filter resampling** — uses O(N) systematic resampling (not multinomial). Draws one uniform `u ~ U[0, 1/N]` then steps through cumulative weight CDF. Lower variance than multinomial at same cost.
-
-**Clayton copula** — sampled via the Marshall-Olkin Gamma frailty algorithm, which generalizes to d > 2 dimensions. Produces lower tail dependence coefficient `λ_L = 2^(-1/θ) > 0`, upper tail coefficient `λ_U = 0`.
-
-**Student-t copula** — sampled via Cholesky decomposition + chi-squared scaling (McNeil et al., 2005, Algorithm 5.10). Symmetric tail dependence: `λ_L = λ_U = 2 * t_{df+1}(-sqrt((df+1)*(1-rho)/(1+rho)))`.
-
-**Brier decomposition** — Murphy (1973) three-way split: `BS = Uncertainty - Resolution + Reliability`. Bins with zero observations are excluded from Resolution and Reliability sums.
+| Level | Topic | Module(s) |
+|---|---|---|
+| 1 | Probability & simulation | `gbm`, `particle` |
+| 2 | Statistics & MLE | `distributions`, `brier` |
+| 3 | Linear algebra & PCA | `factors`, `copula` |
+| 4 | Convex optimization | `portfolio` |
+| 5 | Stochastic calculus & Black-Scholes | `greeks`, `variance`, `importance` |
+| + | Market microstructure | `abm`, `lmsr` |

@@ -7,6 +7,11 @@ Usage:
 
 Commands:
   gbm           Monte Carlo GBM binary contract pricing
+  greeks        Vanilla Black-Scholes pricing + all option Greeks
+  distributions MLE fat-tail fitting + permutation significance test
+  portfolio     Markowitz efficient frontier + Kelly criterion
+  factors       PCA factor analysis + Fama-French style regression
+  lmsr          LMSR automated prediction market (Polymarket math)
   brier         Brier Score calibration analysis
   importance    Importance Sampling for tail risk events
   particle      Particle Filter real-time probability updating
@@ -23,9 +28,13 @@ Global Options:
   --save-plots DIR     Save plots to directory instead of displaying
 
 Examples:
+  python main.py greeks --spot 100 --vol 0.20 --maturity 1.0
+  python main.py distributions --ticker SPY --period 5y
+  python main.py portfolio --tickers AAPL MSFT NVDA AMZN --period 3y
+  python main.py factors --tickers AAPL MSFT NVDA AMZN GOOG --period 3y
+  python main.py lmsr --true-prob 0.65 --n-traders 300
   python main.py gbm --ticker NVDA --strike 1000 --maturity 0.5
   python main.py copula --tickers NVDA AMD SMCI --period 2y
-  python main.py importance --ticker NVDA --threshold 1.5
   python main.py all --seed 42 --no-plots
 """
 
@@ -38,15 +47,20 @@ import os
 # ─── Demo registry ────────────────────────────────────────────────────────────
 
 COMMANDS = {
-    "gbm": "Monte Carlo GBM binary contract pricing",
-    "brier": "Brier Score calibration analysis",
-    "importance": "Importance Sampling for tail risk events",
-    "particle": "Particle Filter real-time probability updating",
-    "variance": "Variance reduction technique comparison",
-    "copula": "Copula model correlated asset simulation",
-    "abm": "Agent-Based Market simulation",
-    "all": "Run all simulations sequentially",
-    "list": "List all available simulations",
+    "gbm":           "Monte Carlo GBM binary contract pricing",
+    "greeks":        "Vanilla Black-Scholes pricing + all option Greeks (Δ Γ Θ ν ρ)",
+    "distributions": "MLE fat-tail fitting (Student-t) + permutation significance test",
+    "portfolio":     "Markowitz efficient frontier + Kelly criterion portfolio sizing",
+    "factors":       "PCA factor analysis + Fama-French style regression (Newey-West SEs)",
+    "lmsr":          "LMSR automated prediction market — the math behind Polymarket",
+    "brier":         "Brier Score calibration analysis",
+    "importance":    "Importance Sampling for tail risk events",
+    "particle":      "Particle Filter real-time probability updating",
+    "variance":      "Variance reduction technique comparison",
+    "copula":        "Copula model correlated asset simulation",
+    "abm":           "Agent-Based Market simulation (LOB + informed/noise/MM agents)",
+    "all":           "Run all simulations sequentially",
+    "list":          "List all available simulations",
 }
 
 
@@ -130,6 +144,43 @@ def build_parser() -> argparse.ArgumentParser:
     p_cop.add_argument("--gain-threshold", type=float, default=0.20, help="Joint gain threshold (default: 0.20)")
     p_cop.add_argument("--maturity", type=float, default=0.5)
 
+    # ── greeks ────────────────────────────────────────────────────────────────
+    p_greeks = subparsers.add_parser("greeks", help=COMMANDS["greeks"])
+    p_greeks.add_argument("--spot",    type=float, default=100.0, help="Spot price S0 (default: 100)")
+    p_greeks.add_argument("--rate",    type=float, default=0.05,  help="Risk-free rate (default: 0.05)")
+    p_greeks.add_argument("--vol",     type=float, default=0.20,  help="Implied volatility (default: 0.20)")
+    p_greeks.add_argument("--maturity",type=float, default=1.0,   help="Time to expiry in years (default: 1.0)")
+
+    # ── distributions ─────────────────────────────────────────────────────────
+    p_dist = subparsers.add_parser("distributions", help=COMMANDS["distributions"])
+    p_dist.add_argument("--ticker", metavar="SYMBOL", help="Fetch real returns from yfinance")
+    p_dist.add_argument("--period", default="5y",     help="yfinance period (default: 5y)")
+
+    # ── portfolio ─────────────────────────────────────────────────────────────
+    p_port = subparsers.add_parser("portfolio", help=COMMANDS["portfolio"])
+    p_port.add_argument("--tickers", nargs="+", metavar="SYMBOL",
+                        help="Tickers to include in the portfolio")
+    p_port.add_argument("--period",  default="3y",  help="yfinance period (default: 3y)")
+    p_port.add_argument("--rate",    type=float, default=0.05, help="Risk-free rate (default: 0.05)")
+    p_port.add_argument("--allow-short", action="store_true", help="Allow short positions")
+
+    # ── factors ───────────────────────────────────────────────────────────────
+    p_fac = subparsers.add_parser("factors", help=COMMANDS["factors"])
+    p_fac.add_argument("--tickers", nargs="+", metavar="SYMBOL",
+                       help="At least 4 tickers for meaningful PCA")
+    p_fac.add_argument("--period",       default="3y", help="yfinance period (default: 3y)")
+    p_fac.add_argument("--n-components", type=int, default=3,
+                       help="Number of PCA components (default: 3)")
+
+    # ── lmsr ──────────────────────────────────────────────────────────────────
+    p_lmsr = subparsers.add_parser("lmsr", help=COMMANDS["lmsr"])
+    p_lmsr.add_argument("--true-prob",  type=float, default=0.65,
+                        help="True probability of YES outcome (default: 0.65)")
+    p_lmsr.add_argument("--n-traders",  type=int,   default=200,
+                        help="Number of traders in simulation (default: 200)")
+    p_lmsr.add_argument("--b",          type=float, default=50.0,
+                        help="LMSR liquidity parameter b (default: 50)")
+
     # ── abm ───────────────────────────────────────────────────────────────────
     p_abm = subparsers.add_parser("abm", help=COMMANDS["abm"])
     p_abm.add_argument("--ticker", metavar="SYMBOL")
@@ -195,6 +246,59 @@ def cmd_gbm(args):
         S0=params["S0"], mu=params["mu"], sigma=params["sigma"],
         r=args.rate, T=args.maturity, n_paths=args.n_paths,
         strikes=strikes, seed=args.seed,
+        no_plots=args.no_plots, save_plots=args.save_plots,
+    )
+
+
+def cmd_greeks(args):
+    from quant_sim.greeks.pricing import run_greeks_demo
+    run_greeks_demo(
+        S0=args.spot, r=args.rate, sigma=args.vol, T=args.maturity,
+        n_sims=args.n_paths, seed=args.seed,
+        no_plots=args.no_plots, save_plots=args.save_plots,
+    )
+
+
+def cmd_distributions(args):
+    from quant_sim.distributions.fitting import run_distributions_demo
+    run_distributions_demo(
+        ticker=getattr(args, "ticker", None),
+        period=getattr(args, "period", "5y"),
+        seed=args.seed,
+        no_plots=args.no_plots, save_plots=args.save_plots,
+    )
+
+
+def cmd_portfolio(args):
+    from quant_sim.portfolio.optimize import run_portfolio_demo
+    run_portfolio_demo(
+        tickers=getattr(args, "tickers", None),
+        period=getattr(args, "period", "3y"),
+        r=getattr(args, "rate", 0.05),
+        allow_short=getattr(args, "allow_short", False),
+        seed=args.seed,
+        no_plots=args.no_plots, save_plots=args.save_plots,
+    )
+
+
+def cmd_factors(args):
+    from quant_sim.factors.analysis import run_factors_demo
+    run_factors_demo(
+        tickers=getattr(args, "tickers", None),
+        period=getattr(args, "period", "3y"),
+        n_pca_components=getattr(args, "n_components", 3),
+        seed=args.seed,
+        no_plots=args.no_plots, save_plots=args.save_plots,
+    )
+
+
+def cmd_lmsr(args):
+    from quant_sim.lmsr.market import run_lmsr_demo
+    run_lmsr_demo(
+        true_prob=args.true_prob,
+        n_traders=args.n_traders,
+        b=args.b,
+        seed=args.seed,
         no_plots=args.no_plots, save_plots=args.save_plots,
     )
 
@@ -295,12 +399,17 @@ def cmd_abm(args):
 
 def cmd_all(args):
     handlers = [
-        ("GBM", lambda: cmd_gbm(args)),
-        ("Brier Score", lambda: cmd_brier(args)),
-        ("Importance Sampling", lambda: cmd_importance(args)),
-        ("Particle Filter", lambda: cmd_particle(args)),
+        ("GBM",                lambda: cmd_gbm(args)),
+        ("Greeks",             lambda: cmd_greeks(args)),
+        ("Distributions",      lambda: cmd_distributions(args)),
+        ("Portfolio",          lambda: cmd_portfolio(args)),
+        ("Factors / PCA",      lambda: cmd_factors(args)),
+        ("LMSR Market",        lambda: cmd_lmsr(args)),
+        ("Brier Score",        lambda: cmd_brier(args)),
+        ("Importance Sampling",lambda: cmd_importance(args)),
+        ("Particle Filter",    lambda: cmd_particle(args)),
         ("Variance Reduction", lambda: cmd_variance(args)),
-        ("Copula Models", lambda: cmd_copula(args)),
+        ("Copula Models",      lambda: cmd_copula(args)),
         ("Agent-Based Market", lambda: cmd_abm(args)),
     ]
 
@@ -334,15 +443,20 @@ def cmd_list(_args):
 # ─── Dispatch ─────────────────────────────────────────────────────────────────
 
 DISPATCH = {
-    "gbm": cmd_gbm,
-    "brier": cmd_brier,
-    "importance": cmd_importance,
-    "particle": cmd_particle,
-    "variance": cmd_variance,
-    "copula": cmd_copula,
-    "abm": cmd_abm,
-    "all": cmd_all,
-    "list": cmd_list,
+    "gbm":           cmd_gbm,
+    "greeks":        cmd_greeks,
+    "distributions": cmd_distributions,
+    "portfolio":     cmd_portfolio,
+    "factors":       cmd_factors,
+    "lmsr":          cmd_lmsr,
+    "brier":         cmd_brier,
+    "importance":    cmd_importance,
+    "particle":      cmd_particle,
+    "variance":      cmd_variance,
+    "copula":        cmd_copula,
+    "abm":           cmd_abm,
+    "all":           cmd_all,
+    "list":          cmd_list,
 }
 
 
